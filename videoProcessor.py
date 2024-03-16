@@ -56,11 +56,15 @@ def userInput(corner):
 
 class videoManager:
     def __init__(self):
+        self.positions_x = []
+        self.positions_y = []
+        self.window_size = 5  # Number of recent positions to consider for the rolling average
         self.eyeCalibration = False
         self.handDatum = False
         self.videoProcessing = False
         self.clickToggleCount = 0
         self.sector = ['left', 'top']
+        self.sensitivity = 3
         args = get_args()
 
         model_path = 'model/face_models/face_landmarker.task'
@@ -132,6 +136,10 @@ class videoManager:
         return cv2image, debug_image, timestamp
     
     def processVideo(self):
+        handTriggerCount = 0
+        # directionChange = False
+        # directionHorizontal = 'start'
+        # directionVertical = 'start'
         while self.videoProcessing == True:
             fps = self.FPS.get()
             key = cv.waitKey(10)
@@ -143,99 +151,92 @@ class videoManager:
                 break
             else:
                 results = self.hands.process(image)
-                # cv.imshow('Hand Gesture Recognition', image)
-            if results.multi_hand_landmarks is not None:
-                for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-                    brect = self.calc_bounding_rect(debugImage, hand_landmarks)
-                    landmark_list = self.calc_landmark_list(debugImage, hand_landmarks)
-                    # print(landmark_list[8])
-                    if self.handDatum == False:
-                        time.sleep(1)
-                        self.handDatum = landmark_list[8]
-                    if self.sector[0] == 'left':
-                        if self.sector[1] == 'top':
-                            # print("topLeft")
-                            deltaX = ((landmark_list[8][0]-self.handDatum[0])*3)+topLeftSector[0]
-                            deltaY = ((landmark_list[8][1]-self.handDatum[1])*3)+topLeftSector[1]
-                            # print(deltaX, deltaY)
-                            pg.moveTo(deltaX, deltaY, duration=0.1)
-                        elif self.sector[1] == 'bottom':
-                            # print("bottomLeft")
-                            deltaX = ((landmark_list[8][0]-self.handDatum[0])*3)+bottomLeftSector[0]
-                            deltaY = ((landmark_list[8][1]-self.handDatum[1])*3)+bottomLeftSector[1]
-                            pg.moveTo(deltaX, deltaY, duration=0.1)
-                    elif self.sector[0] == 'right':
-                        if self.sector[1] == 'top':
-                            # print("topRight")
-                            deltaX = ((landmark_list[8][0]-self.handDatum[0])*3)+topRightSector[0]
-                            deltaY = ((landmark_list[8][1]-self.handDatum[1])*3)+topRightSector[1]
-                            pg.moveTo(deltaX, deltaY, duration=0.1)
-                        elif self.sector[1] == 'bottom':
-                            # print("bottomRight")
-                            deltaX = ((landmark_list[8][0]-self.handDatum[0])*3)+bottomRightSector[0]
-                            deltaY = ((landmark_list[8][1]-self.handDatum[1])*3)+bottomRightSector[1]
-                            pg.moveTo(deltaX, deltaY, duration=0.1)
-                    # pre_processed_landmark_list = self.pre_process_landmark(
-                    #     landmark_list)
-                    # pre_processed_point_history_list = self.pre_process_point_history(
-                    #     debugImage, self.point_history)
-                    # self.logging_csv(number, mode, pre_processed_landmark_list,
-                    #             pre_processed_point_history_list)
-
-                    # hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
-                    # if hand_sign_id == 2: 
-                    #     self.point_history.append(landmark_list[8])
-                    # else:
-                    #     self.point_history.append([0, 0])
-
-                    # finger_gesture_id = 0
-                    # point_history_len = len(pre_processed_point_history_list)
-                    # if point_history_len == (self.history_length * 2):
-                    #     finger_gesture_id = self.point_history_classifier(
-                    #         pre_processed_point_history_list)
-
-                    # self.finger_gesture_history.append(finger_gesture_id)
-                    # most_common_fg_id = Counter(
-                    #     self.finger_gesture_history).most_common()
-                    thumbLength = self.distance(landmark_list[4], landmark_list[3])
-                    thumbDistance = self.distance(landmark_list[4], landmark_list[6])
-                    if thumbDistance < 0.5*thumbLength:
-                        self.clickToggleCount += 1
-                    else:
-                        if self.clickToggleCount > 2 and self.clickToggleCount < 20:
-                            print("Click")
-                            # self.sectorAttention(image)
-                            pg.click()
-                        self.clickToggleCount = 0
-                    print(self.clickToggleCount)
-                    debugImage = self.draw_bounding_rect(self.use_brect, debugImage, brect)
-                    debugImage = self.draw_landmarks(debugImage, landmark_list)
-                    # debugImage = self.draw_info_text(
-                    #     debugImage,
-                    #     brect,
-                    #     handedness,
-                    #     self.keypoint_classifier_labels[hand_sign_id],
-                    #     self.point_history_classifier_labels[most_common_fg_id[0][0]],
-                    # )
-                    image = debugImage
-                    # self.handDatum = landmark_list[8]
+            if results.multi_hand_landmarks is not None:    # Hand is in the frame
+                handTriggerCount += 1
+                if handTriggerCount > 15:                   # Hand has been in the frame for 15 frames
+                    for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                        brect = self.calc_bounding_rect(debugImage, hand_landmarks)
+                        landmark_list = self.calc_landmark_list(debugImage, hand_landmarks)
+                        if self.handDatum == False:         # When hand enters the frame: use the current sector focus for the anchor location and set the hand postion datum
+                            self.handDatum = landmark_list[8]
+                            if self.sector[0] == 'left':
+                                if self.sector[1] == 'top':
+                                    anchorX = topLeftSector[0]
+                                    anchorY = topLeftSector[1]
+                                elif self.sector[1] == 'bottom':
+                                    anchorX = bottomLeftSector[0]
+                                    anchorY = bottomLeftSector[1]
+                            elif self.sector[0] == 'right':
+                                if self.sector[1] == 'top':
+                                    anchorX = topRightSector[0]
+                                    anchorY = topRightSector[1]
+                                elif self.sector[1] == 'bottom':
+                                    anchorX = bottomRightSector[0]
+                                    anchorY = bottomRightSector[1]
+                        # Calculate the rolling averages and hand position jitter
+                        self.positions_x.append(landmark_list[8][0])    # Append x, y coordinates of the hand to the list
+                        self.positions_y.append(landmark_list[8][1])
+                        while len(self.positions_x) > self.window_size: # Maintain the window size
+                            self.positions_x.pop(0)
+                            self.positions_y.pop(0)
+                        xHandPosition = sum(self.positions_x) / len(self.positions_x)   # Calculate the rolling average
+                        yHandPosition = sum(self.positions_y) / len(self.positions_y)
+                        jitter = (xHandPosition-landmark_list[8][0])**2+(yHandPosition-landmark_list[8][1])**2  # Calculate the jitter
+                        deltaX = xHandPosition-self.handDatum[0]
+                        newX = (deltaX*self.sensitivity)+anchorX
+                        if abs(deltaX) > 40 and abs(deltaX) < 70:
+                            anchorX = anchorX + (newX-anchorX)*0.1
+                        elif abs(deltaX) > 70:
+                            anchorX = anchorX + (newX-anchorX)*0.20
+                        elif jitter < 100:
+                            self.window_size = 20
+                        else:
+                            self.window_size = 5
+                        deltaY = yHandPosition-self.handDatum[1]
+                        newY = (deltaY*self.sensitivity)+anchorY
+                        if abs(deltaY) > 40 and abs(deltaY) < 70:
+                            anchorY = anchorY + (newY-anchorY)*0.1
+                        elif abs(deltaY) > 70:
+                            anchorY = anchorY + (newY-anchorY)*0.20
+                        elif jitter < 70:
+                            self.window_size = 15
+                        else:
+                            self.window_size = 5
+                        pg.moveTo(newX, newY, duration=0.1)
+                        # Check for click gesture
+                        thumbLength = self.distance(landmark_list[4], landmark_list[3])
+                        thumbDistance = self.distance(landmark_list[4], landmark_list[11])
+                        if thumbDistance < 0.85*thumbLength:
+                            self.clickToggleCount += 1
+                        else:
+                            if self.clickToggleCount > 2 and self.clickToggleCount < 20:
+                                print("Click")
+                                pg.click()
+                            self.clickToggleCount = 0
+                        print(self.clickToggleCount)
+                        # Debug image
+                        debugImage = self.draw_bounding_rect(self.use_brect, debugImage, brect)
+                        debugImage = self.draw_landmarks(debugImage, landmark_list)
+                        image = debugImage
             else:
                 print("No hand found: Eye tracking mode")
+                handTriggerCount = 0
+                self.handDatum = False
                 self.point_history.append([0, 0])
-                self.sectorAttention(image)
-    #     if faceResults.multi_face_landmarks is not None:
-    #         # print(len(faceResults.multi_face_landmarks[0]))
-    #         gaze(image, faceResults.multi_face_landmarks[0])
+                self.sectorAttentionHead(image)
 
+        # if faceResults.multi_face_landmarks is not None:
+        #     # print(len(faceResults.multi_face_landmarks[0]))
+    #         gaze(image, faceResults.multi_face_landmarks[0])
             debugImage = self.draw_point_history(debugImage, self.point_history)
             debugImage = self.draw_info(debugImage, fps, mode, number)
-
             cv.imshow('Hand Gesture Recognition', image)
 
         self.videoFeed.release()
         cv.destroyAllWindows()
     
-    def sectorAttention(self, image):
+    def sectorAttentionHead(self, image):
+        '''Function to track the user's head gaze and determine which sector of the screen the user's head is pointed towards'''
         try:
             faceResults = self.faceMesh.process(image)
             image, gazeCoordinates = self.gaze(image, faceResults.multi_face_landmarks[0])

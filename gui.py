@@ -1,6 +1,8 @@
-from PyQt6.QtWidgets import QApplication, QWidget, QMessageBox, QMainWindow, QGraphicsScene, QGraphicsView, QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem, QGraphicsPixmapItem
+from PyQt6 import QtWidgets
 from PyQt6 import QtCore, uic
-from PyQt6.QtGui import QMovie, QPixmap, QColor, QPainter, QPen, QBrush, QPainterPath
+from PyQt6 import QtGui
+import pynput
+import pyautogui as pg
 import sys
 import time
 import videoProcessor as video
@@ -8,9 +10,10 @@ import audioProcessor as audio
 import pyautogui as pg
 import multiprocessing as mp
 tracker = video.videoManager()
+mouse = pynput.mouse.Controller()
 pg.FAILSAFE = False
 
-class gestureControlSetup(QMainWindow):
+class gestureControlSetup(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         uic.loadUi('GUI/gestureControlSetup.ui', self)
@@ -37,7 +40,14 @@ class gestureControlSetup(QMainWindow):
             tracker.videoProcessing = True
             tracker.processVideo()
 
-class calibrateWindow(QWidget):
+    def closeEvent(self, event):
+        tracker.videoProcessing = False
+        #close all windows and processes
+        self.close()
+        mouseTrackerProcess.terminate()
+        event.accept()
+            
+class calibrateWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         uic.loadUi('GUI/calibrate.ui', self)
@@ -46,6 +56,7 @@ class calibrateWindow(QWidget):
         screenSize = pg.size()
         self.setFixedWidth(screenSize[0])
         self.setFixedHeight(screenSize[1])
+    
     def nextButtonClicked(self):
         if self.corner == 0:
             tracker.calibrateGaze(0)
@@ -72,18 +83,29 @@ class calibrateWindow(QWidget):
             self.nextButton.setText("Next")
             self.hide()
 
+
+def mouseTracker():
+    def on_click(x, y, button, pressed):
+        if pressed:
+            print(f"Mouse clicked at ({x}, {y})")
+
+    with pynput.mouse.Listener(on_click=on_click) as listener:
+        listener.join()
+
 if __name__ == '__main__':
     filePath = mp.Queue()
     audioText = mp.Array('c', 100)
     audioToggle = mp.Value('i', 0)
     audioProcess = mp.Process(target=audio.rollingAudio, args=(filePath, audioToggle,))
     transcribeProcess = mp.Process(target=audio.transcribeAudio, args=(filePath, audioText,))
+    mouseTrackerProcess = mp.Process(target=mouseTracker)
+    mouseTrackerProcess.start()
     # audioProcess.start()
     # time.sleep(5)
     # transcribeProcess.start()
     # while True:
     #     print(audioText.value.decode('utf-8'))
     #     time.sleep(1)
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     mainWindow = gestureControlSetup()
     sys.exit(app.exec())
